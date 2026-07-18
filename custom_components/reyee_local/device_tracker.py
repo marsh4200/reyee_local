@@ -1,4 +1,4 @@
-"""Device tracker — one per client, with IP and named VLAN."""
+"""Device tracker — one per client, real name + wire/wireless/signal/port."""
 import logging
 
 from homeassistant.components.device_tracker import SourceType
@@ -22,7 +22,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 seen.add(mac)
                 new.append(ReyeeTracker(coordinator, entry, mac))
         if new:
-            _LOGGER.debug("Reyee: adding %d trackers", len(new))
             async_add_entities(new)
 
     _add()
@@ -34,22 +33,21 @@ class ReyeeTracker(CoordinatorEntity, ScannerEntity):
         super().__init__(coordinator)
         self._mac = mac
         self._last_ip = None
-        self._last_vlan = None
-        self._attr_unique_id = f"{entry.entry_id}_tracker_{mac.replace(':','')}"
+        self._attr_unique_id = f"{entry.entry_id}_tracker_{mac.replace(':', '')}"
 
     def _client(self):
         for c in (self.coordinator.data or {}).get("clients", []):
             if c.get("mac") == self._mac:
                 if c.get("ip"):
                     self._last_ip = c["ip"]
-                if c.get("vlan"):
-                    self._last_vlan = c["vlan"]
                 return c
         return None
 
     @property
     def name(self):
-        return self._mac.upper()
+        c = self._client()
+        # Real name resolved by the coordinator (devRemark > alias > hostname > MAC)
+        return (c or {}).get("name") or self._mac.upper()
 
     @property
     def source_type(self):
@@ -69,12 +67,29 @@ class ReyeeTracker(CoordinatorEntity, ScannerEntity):
         return self._mac
 
     @property
+    def icon(self):
+        c = self._client() or {}
+        if c.get("connection") == "wireless":
+            return "mdi:wifi"
+        if c.get("connection") == "wired":
+            return "mdi:ethernet"
+        return "mdi:lan-connect"
+
+    @property
     def extra_state_attributes(self):
         c = self._client() or {}
-        return {
+        attrs = {
             "ip_address": c.get("ip") or self._last_ip,
-            "vlan":       c.get("vlan") or self._last_vlan,
-            "vlan_id":    c.get("vlan_id"),
-            "interface":  c.get("intf"),
-            "mac":        self._mac,
+            "vlan": c.get("vlan"),
+            "connection": c.get("connection"),
+            "mac": self._mac,
         }
+        if c.get("connection") == "wireless":
+            attrs["ssid"] = c.get("ssid")
+            attrs["band"] = c.get("band")
+            attrs["signal_dbm"] = c.get("rssi")
+        if c.get("switch_port"):
+            attrs["switch_port"] = c.get("switch_port")
+        if c.get("online_since"):
+            attrs["online_since"] = c.get("online_since")
+        return attrs

@@ -1,4 +1,4 @@
-"""WAN connectivity binary sensor."""
+"""WAN / internet connectivity binary sensor."""
 import logging
 
 from homeassistant.components.binary_sensor import (
@@ -14,10 +14,10 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([ReyeeWanOnline(coordinator, entry)])
+    async_add_entities([ReyeeInternetOnline(coordinator, entry)])
 
 
-class ReyeeWanOnline(CoordinatorEntity, BinarySensorEntity):
+class ReyeeInternetOnline(CoordinatorEntity, BinarySensorEntity):
     _attr_name = "Reyee WAN Online"
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
 
@@ -33,16 +33,13 @@ class ReyeeWanOnline(CoordinatorEntity, BinarySensorEntity):
 
     @property
     def is_on(self):
-        d = self.coordinator.data or {}
-        # An active uplink reported by mllb means the gateway has a live WAN.
-        return bool(d.get("active_wan"))
+        # networkConnect is the router's own internet-reachability check
+        return bool((self.coordinator.data or {}).get("internet_up"))
 
     @property
     def extra_state_attributes(self):
         d = self.coordinator.data or {}
-        m = d.get("mllb", {})
         return {
             "active_uplink": d.get("active_wan"),
-            "mode":          m.get("mode"),
-            "policy":        m.get("policy"),
+            "public_ip": d.get("wan_ip"),
         }

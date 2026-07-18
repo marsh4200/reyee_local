@@ -1,16 +1,15 @@
 {
   "domain": "reyee_local",
   "name": "Ruijie Reyee (Local)",
+  "version": "1.7.3",
+  "documentation": "https://github.com/marsh4200/reyee_local",
   "codeowners": [
     "@marsh4200"
   ],
   "config_flow": true,
-  "documentation": "https://github.com/marsh4200/ruijie_reyee",
-  "integration_type": "hub",
   "iot_class": "local_polling",
-  "issue_tracker": "https://github.com/marsh4200/ruijie_reyee/issues",
+  "integration_type": "hub",
   "requirements": [
     "cryptography>=3.0"
-  ],
-  "version": "1.5.0"
+  ]
 }

@@ -158,17 +158,31 @@ class ReyeeLocalAPI:
         return await self._cmd("devConfig.get", module, data)
 
 
-    async def raw_cmd(self, method, module, data=None):
-        """Expose a raw call for diagnostics (returns full body, no filtering)."""
+    async def raw_cmd(self, method, module, data=None, no_parse=False, extra=None):
+        """
+        Raw call for diagnostics / advanced modules.
+
+        Reyee's eWeb sends more than {module,device} for many modules: a
+        `data` sub-object, plus `noParse`/`async`/`remoteIp` flags. Support all
+        of them so modules like user_list, flow, pppoeLog answer correctly.
+        """
         if not self.sid:
             await self.login()
         base = self._base or await self._resolve_base()
-        params = {"module": module, "device": "pc"}
+        params = {
+            "module": module,
+            "noParse": bool(no_parse),
+            "async": None,
+            "remoteIp": False,
+            "device": "pc",
+        }
         if data is not None:
             params["data"] = data
+        if extra:
+            params.update(extra)
         payload = {"id": self._next_id(), "method": method, "params": params}
         try:
-            async with async_timeout.timeout(12):
+            async with async_timeout.timeout(15):
                 async with self.session.post(
                     f"{base}/cgi-bin/luci/api/cmd?auth={self.sid}",
                     json=payload, ssl=False,
