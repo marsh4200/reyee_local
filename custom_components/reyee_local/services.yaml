@@ -1,0 +1,99 @@
+deep_probe:
+  name: Deep network probe
+  description: >
+    Sweeps the router's local API and posts the raw responses as a notification.
+    Diagnostic tool for discovering what your firmware exposes.
+
+set_primary_wan:
+  name: Set primary WAN
+  description: >
+    Switch which WAN uplink is the primary (master) line. The gateway applies
+    this asynchronously and may drop the management path briefly.
+  fields:
+    ifname:
+      name: Interface
+      description: WAN interface name (e.g. wan, wan1)
+      required: true
+      example: wan1
+      selector:
+        text:
+
+set_forced_switch:
+  name: Set forced switch
+  description: >
+    Turn "Forced Switch" on or off. When on, all traffic uses the primary WAN
+    unless it drops entirely.
+  fields:
+    enabled:
+      name: Enabled
+      description: Whether forced switch should be on
+      required: true
+      selector:
+        boolean:
+
+add_port_forward:
+  name: Add port forward
+  description: >
+    Create (or replace by name) a port-forwarding rule. Existing rules are
+    preserved. Applies immediately.
+  fields:
+    name:
+      name: Rule name
+      description: Unique name for the rule (replaces any existing rule with this name)
+      required: true
+      example: NVR HTTPS
+      selector:
+        text:
+    wan_port:
+      name: WAN port
+      description: External port on the internet side
+      required: true
+      example: 8443
+      selector:
+        number:
+          min: 1
+          max: 65535
+          mode: box
+    lan_ip:
+      name: LAN IP
+      description: Internal device IP to forward to
+      required: true
+      example: 192.168.88.99
+      selector:
+        text:
+    lan_port:
+      name: LAN port
+      description: Internal port on the device
+      required: true
+      example: 443
+      selector:
+        number:
+          min: 1
+          max: 65535
+          mode: box
+    protocol:
+      name: Protocol
+      required: false
+      default: tcp
+      selector:
+        select:
+          options: [tcp, udp, tcp+udp]
+    wan_interface:
+      name: WAN interface
+      description: Which WAN line (wan or wan1)
+      required: false
+      default: wan
+      selector:
+        text:
+
+remove_port_forward:
+  name: Remove port forward
+  description: Delete a port-forwarding rule by name.
+  fields:
+    name:
+      name: Rule name
+      description: Name of the rule to remove
+      required: true
+      example: NVR HTTPS
+      selector:
+        text:
