@@ -36,6 +36,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         ReyeePortForwardSensor(coordinator, entry),
         ReyeeFlowControlSensor(coordinator, entry),
         ReyeeTopologySensor(coordinator, entry),
+        ReyeeSsidSensor(coordinator, entry),
     ]
     seen_vlans, seen_wan, seen_ports = set(), set(), set()
 
@@ -52,6 +53,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 new.append(ReyeeWanRoleSensor(coordinator, entry, ifn))
                 new.append(ReyeeWanThroughputSensor(coordinator, entry, ifn, "down"))
                 new.append(ReyeeWanThroughputSensor(coordinator, entry, ifn, "up"))
+                new.append(ReyeePppoeSensor(coordinator, entry, ifn))
         for p in (coordinator.data or {}).get("ports", []):
             pid = p.get("portId")
             if pid and pid not in seen_ports:
@@ -410,4 +412,72 @@ class ReyeeGatewaySensor(CoordinatorEntity, SensorEntity):
             "public_ip": s.get("wan_ip"),
             "forward_mode": s.get("forwardMode"),
             "vlan_count": len(d.get("vlans", [])),
+        }
+
+
+class ReyeePppoeSensor(CoordinatorEntity, SensorEntity):
+    """PPPoE connection status + drop tracking for a WAN line."""
+    _attr_icon = "mdi:transit-connection-variant"
+
+    def __init__(self, coordinator, entry, ifname):
+        super().__init__(coordinator)
+        self._ifn = ifname
+        self._attr_name = f"Reyee WAN {ifname} PPPoE"
+        self._attr_unique_id = f"{entry.entry_id}_pppoe_{ifname}"
+        self._attr_device_info = _gw(entry)
+
+    def _p(self):
+        return (self.coordinator.data or {}).get("pppoe", {}).get(self._ifn, {})
+
+    @property
+    def native_value(self):
+        return self._p().get("status", "unknown")
+
+    @property
+    def icon(self):
+        st = self.native_value
+        if st == "connected":
+            return "mdi:lan-connect"
+        if st == "disconnected":
+            return "mdi:lan-disconnect"
+        return "mdi:lan-pending"
+
+    @property
+    def extra_state_attributes(self):
+        p = self._p()
+        return {
+            "drop_count": p.get("drop_count"),
+            "last_disconnect": p.get("last_disconnect"),
+            "last_connect": p.get("last_connect"),
+            "recent_events": p.get("recent", []),
+        }
+
+
+class ReyeeSsidSensor(CoordinatorEntity, SensorEntity):
+    """Number of enabled WiFi SSIDs (from the AC controller), list in attributes."""
+    _attr_name = "Reyee WiFi SSIDs"
+    _attr_icon = "mdi:wifi-settings"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.entry_id}_ssids"
+        self._attr_device_info = _gw(entry)
+
+    @property
+    def native_value(self):
+        return sum(1 for s in (self.coordinator.data or {}).get("ssids", [])
+                   if s.get("enabled"))
+
+    @property
+    def extra_state_attributes(self):
+        ssids = (self.coordinator.data or {}).get("ssids", [])
+        # Deliberately no passwords exposed here.
+        d = self.coordinator.data or {}
+        return {
+            "wireless_raw": d.get("ssids_debug", "n/a"),
+            "pppoe_raw": d.get("pppoe_debug", "n/a"),
+            "ssids": [
+                {"name": s["name"], "enabled": s["enabled"], "hidden": s["hidden"],
+                 "vlan": s["vlan"], "guest": s["guest"]} for s in ssids],
         }

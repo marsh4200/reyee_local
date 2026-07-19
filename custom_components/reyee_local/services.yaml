@@ -97,3 +97,20 @@ remove_port_forward:
       example: NVR HTTPS
       selector:
         text:
+
+set_ssid:
+  name: Set WiFi SSID on/off
+  description: Enable or disable a WiFi SSID by its wlan_id.
+  fields:
+    wlan_id:
+      name: WLAN ID
+      description: The SSID's wlan_id (see the Reyee WiFi SSIDs sensor attributes)
+      required: true
+      example: "8"
+      selector:
+        text:
+    enabled:
+      name: Enabled
+      required: true
+      selector:
+        boolean:

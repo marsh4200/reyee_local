@@ -1,13 +1,26 @@
-"""Device tracker — one per client, real name + wire/wireless/signal/port."""
+"""Device tracker — each client is its own device, connected *via* the gateway.
+
+Using via_device makes Home Assistant group every tracked client underneath the
+gateway: the gateway's device page lists them, and each client is clickable in
+its own right. This is the standard router-integration hierarchy.
+"""
 import logging
 
 from homeassistant.components.device_tracker import SourceType
 from homeassistant.components.device_tracker.config_entry import ScannerEntity
+from homeassistant.helpers.device_registry import DeviceInfo, CONNECTION_NETWORK_MAC
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _resolve_name(coordinator, mac):
+    for c in (coordinator.data or {}).get("clients", []):
+        if c.get("mac") == mac:
+            return c.get("name") or mac.upper()
+    return mac.upper()
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -29,11 +42,25 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
 
 class ReyeeTracker(CoordinatorEntity, ScannerEntity):
+    # The client device carries the name; the tracker entity inherits it.
+    _attr_has_entity_name = True
+    _attr_name = None
+
     def __init__(self, coordinator, entry, mac):
         super().__init__(coordinator)
         self._mac = mac
         self._last_ip = None
+        self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_tracker_{mac.replace(':', '')}"
+
+        name = _resolve_name(coordinator, mac)
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{entry.entry_id}_client_{mac.replace(':', '')}")},
+            connections={(CONNECTION_NETWORK_MAC, mac)},
+            name=name,
+            # This is the hierarchy: client hangs off the gateway device.
+            via_device=(DOMAIN, entry.entry_id),
+        )
 
     def _client(self):
         for c in (self.coordinator.data or {}).get("clients", []):
@@ -42,12 +69,6 @@ class ReyeeTracker(CoordinatorEntity, ScannerEntity):
                     self._last_ip = c["ip"]
                 return c
         return None
-
-    @property
-    def name(self):
-        c = self._client()
-        # Real name resolved by the coordinator (devRemark > alias > hostname > MAC)
-        return (c or {}).get("name") or self._mac.upper()
 
     @property
     def source_type(self):
@@ -73,7 +94,7 @@ class ReyeeTracker(CoordinatorEntity, ScannerEntity):
             return "mdi:wifi"
         if c.get("connection") == "wired":
             return "mdi:ethernet"
-        return "mdi:lan-connect"
+        return "mdi:lan-disconnect" if not self.is_connected else "mdi:lan-connect"
 
     @property
     def extra_state_attributes(self):

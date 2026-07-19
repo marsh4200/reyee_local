@@ -30,25 +30,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     sys = (coordinator.data or {}).get("sysinfo", {})
     if sys:
         model = sys.get("model") or sys.get("product_class") or "EG Series"
-        # Retitle the entry to the real model once, so it's identifiable at a
-        # glance instead of an IP. User renames are preserved.
-        default_title = f"Reyee {entry.data[CONF_HOST]}"
-        if entry.title == default_title:
-            hass.config_entries.async_update_entry(entry, title=f"Reyee {model}")
+        gw_name = f"Reyee {model}"
 
         registry = dr.async_get(hass)
-        registry.async_get_or_create(
+        device = registry.async_get_or_create(
             config_entry_id=entry.entry_id,
             identifiers={(DOMAIN, entry.entry_id)},
             manufacturer=sys.get("manufacturer", "Ruijie Networks"),
             model=model,
-            name=entry.title,
+            name=gw_name,
             hw_version=sys.get("hardware_version"),
             sw_version=sys.get("software_version"),
             connections={(dr.CONNECTION_NETWORK_MAC, sys.get("sys_mac"))}
                         if sys.get("sys_mac") else set(),
             configuration_url=f"http://{entry.data[CONF_HOST]}",
         )
+        # If an earlier version created this device with a fallback name
+        # (e.g. "Reyee EG Series"), correct it now that we know the model —
+        # but never override a name the user set themselves.
+        if device.name_by_user is None and device.name != gw_name:
+            registry.async_update_device(device.id, name=gw_name)
 
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = coordinator
@@ -89,6 +90,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         for coord in _coords():
             await coord.async_remove_port_forward(call.data["name"])
 
+    async def _set_ssid(call: ServiceCall):
+        wlan_id = call.data["wlan_id"]
+        enabled = call.data["enabled"]
+        for coord in _coords():
+            await coord.async_set_ssid_enabled(wlan_id, enabled)
+
     if not hass.services.has_service(DOMAIN, "deep_probe"):
         hass.services.async_register(DOMAIN, "deep_probe", _deep_probe)
         hass.services.async_register(
@@ -115,6 +122,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             DOMAIN, "remove_port_forward", _remove_port_forward,
             schema=vol.Schema({vol.Required("name"): cv.string}),
         )
+        hass.services.async_register(
+            DOMAIN, "set_ssid", _set_ssid,
+            schema=vol.Schema({
+                vol.Required("wlan_id"): cv.string,
+                vol.Required("enabled"): cv.boolean,
+            }),
+        )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
@@ -131,6 +145,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN].pop(entry.entry_id, None)
         if not hass.data[DOMAIN]:
             for svc in ("deep_probe", "set_primary_wan", "set_forced_switch",
-                        "add_port_forward", "remove_port_forward"):
+                        "add_port_forward", "remove_port_forward", "set_ssid"):
                 hass.services.async_remove(DOMAIN, svc)
     return unloaded

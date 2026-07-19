@@ -20,7 +20,8 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .const import DOMAIN, DEFAULT_SCAN_INTERVAL, CONF_SCAN_INTERVAL
 from .api import (ReyeeAuthError, ReyeeConnError, build_master_swap_payload,
-                  build_portmap_add, build_portmap_remove, build_flowctrl_toggle)
+                  build_portmap_add, build_portmap_remove, build_flowctrl_toggle,
+                  build_ssid_toggle)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -48,6 +49,8 @@ def _is_error(r):
     if isinstance(r, str):
         return r.strip() == ""
     if isinstance(r, dict):
+        if "_error" in r:
+            return True
         if r.get("rcode") and str(r.get("rcode")) != "00000000":
             return True
         if r.get("rmsg"):
@@ -81,6 +84,18 @@ class ReyeeCoordinator(DataUpdateCoordinator):
         try:
             r = await self.api.get_config(module, data)
             return None if _is_error(r) else r
+        except Exception:  # noqa: BLE001
+            return None
+
+    async def _ac(self, module, data=None):
+        """acConfig.get path for the wireless controller modules."""
+        try:
+            r = await self.api.raw_cmd("acConfig.get", module, data=data)
+            if _is_error(r):
+                return None
+            if isinstance(r, dict) and isinstance(r.get("data"), (dict, list)):
+                return r["data"]
+            return r
         except Exception:  # noqa: BLE001
             return None
 
@@ -165,6 +180,28 @@ class ReyeeCoordinator(DataUpdateCoordinator):
         })
         for child in node.get("children", []) or []:
             ReyeeCoordinator._flatten_topology(child, out, depth + 1)
+
+    @staticmethod
+    def _parse_pppoe(entries):
+        if not entries:
+            return {}
+        ordered = sorted(entries, key=lambda e: int(e.get("order", 0) or 0))
+        last = ordered[-1]
+        code = str(last.get("code"))
+        if code == "5":
+            status = "connected"
+        elif code in ("11", "9"):
+            status = "disconnected"
+        else:
+            status = "connecting"
+        disc = next((e.get("time") for e in reversed(ordered)
+                     if str(e.get("code")) in ("11", "9")), None)
+        conn = next((e.get("time") for e in reversed(ordered)
+                     if str(e.get("code")) == "5"), None)
+        drops = sum(1 for e in ordered if str(e.get("code")) == "11")
+        recent = [f'{e.get("time")} \u2014 {e.get("msg")}' for e in ordered[-6:]]
+        return {"status": status, "last_disconnect": disc,
+                "last_connect": conn, "drop_count": drops, "recent": recent}
 
     async def _async_update_data(self):
         try:
@@ -288,6 +325,61 @@ class ReyeeCoordinator(DataUpdateCoordinator):
 
         sysinfo = await self._get("sysinfo") or {}
 
+        # ── PPPoE connection log per WAN line (drop tracking) ──────────────
+        # Fully guarded: a failure here must never take down the whole update.
+        pppoe = {}
+        _pppoe_debug = {}
+        try:
+            for line in wan_lines:
+                ifn = line.get("ifname")
+                if not ifn:
+                    continue
+                raw = await self.api.raw_cmd(
+                    "devSta.get", "pppoeLog",
+                    data={"intf_name": [ifn]}, no_parse=False)
+                _pppoe_debug[ifn] = repr(raw)[:250]
+                body = raw.get("data") if isinstance(raw, dict) else None
+                entries = None
+                if isinstance(body, dict) and isinstance(body.get(ifn), list):
+                    entries = body[ifn]
+                elif isinstance(raw, dict) and isinstance(raw.get(ifn), list):
+                    entries = raw[ifn]
+                if entries:
+                    try:
+                        pppoe[ifn] = self._parse_pppoe(entries)
+                    except Exception as err:  # noqa: BLE001
+                        _pppoe_debug[ifn] = f"parse error: {err}"
+        except Exception as err:  # noqa: BLE001
+            _pppoe_debug["_error"] = str(err)
+            _LOGGER.warning("Reyee pppoe read failed: %s", err)
+
+        # ── WiFi SSIDs from the AC controller (read-only) ─────────────────
+        # Mirror the exact call the deep probe uses (data=None), fully guarded.
+        ssids = []
+        _ssid_debug = ""
+        try:
+            wireless_raw = await self.api.raw_cmd("acConfig.get", "wireless")
+            _ssid_debug = repr(wireless_raw)[:400]
+            wireless = None
+            if isinstance(wireless_raw, dict):
+                inner = wireless_raw.get("data")
+                wireless = inner if isinstance(inner, dict) else wireless_raw
+            if isinstance(wireless, dict) and wireless.get("ssidList"):
+                for s_ in wireless.get("ssidList", []):
+                    ssids.append({
+                        "name": s_.get("ssidName"),
+                        "enabled": s_.get("enable") == "true",
+                        "hidden": s_.get("ishidden") == "true",
+                        "vlan": s_.get("vlanId"),
+                        "guest": s_.get("guest") == "true",
+                        "band": s_.get("relatedRadio"),
+                        "wlan_id": s_.get("wlanId"),
+                    })
+        except Exception as err:  # noqa: BLE001
+            _ssid_debug = f"read error: {err}"
+            _LOGGER.warning("Reyee wireless read failed: %s", err)
+        _LOGGER.info("Reyee [v1.11.4] parsed %d ssids", len(ssids))
+
         # port forwards + flow control (confirmed writable)
         pm = await self._cfg("port_mapping")
         pm_data = pm.get("data", pm) if isinstance(pm, dict) else {}
@@ -311,6 +403,10 @@ class ReyeeCoordinator(DataUpdateCoordinator):
             "wan_ip": sysinfo.get("wan_ip"),
             "port_forwards": port_forwards,
             "flowctrl": flowctrl,
+            "pppoe": pppoe,
+            "ssids": ssids,
+            "ssids_debug": _ssid_debug,
+            "pppoe_debug": _pppoe_debug,
         }
 
     # ── Writes (unchanged) ───────────────────────────────────────────────
@@ -355,4 +451,14 @@ class ReyeeCoordinator(DataUpdateCoordinator):
             raise ReyeeConnError("Could not read current flowctrl")
         data = cfg.get("data", cfg) if isinstance(cfg, dict) else {}
         await self.api.set_config("flowctrl", build_flowctrl_toggle(data, enabled))
+        await self.async_request_refresh()
+
+    async def async_set_ssid_enabled(self, wlan_id, enabled: bool):
+        """Enable/disable a WiFi SSID via the AC controller."""
+        cfg = await self._ac("wireless", {"groupId": "0"})
+        if not cfg:
+            raise ReyeeConnError("Could not read current wireless config")
+        payload = build_ssid_toggle(cfg, wlan_id, enabled)
+        await self.api.set_ac_config("wireless", payload)
+        _LOGGER.info("Reyee: SSID wlanId=%s enabled=%s", wlan_id, enabled)
         await self.async_request_refresh()

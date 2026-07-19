@@ -226,6 +226,32 @@ class ReyeeLocalAPI:
             raise ReyeeConnError(f"Router rejected {module} write: {msg}")
         return body
 
+    async def set_ac_config(self, module, data, timeout=60):
+        """Write AC-controller config (acConfig.set), e.g. wireless SSIDs."""
+        if not self.sid:
+            await self.login()
+        base = self._base or await self._resolve_base()
+        params = {"module": module, "noParse": False, "async": None,
+                  "remoteIp": False, "device": "pc", "data": data}
+        payload = {"id": self._next_id(), "method": "acConfig.set", "params": params}
+        try:
+            async with async_timeout.timeout(timeout):
+                async with self.session.post(
+                    f"{base}/cgi-bin/luci/api/cmd?auth={self.sid}",
+                    json=payload, ssl=False,
+                ) as resp:
+                    body = await resp.json(content_type=None)
+        except asyncio.TimeoutError:
+            _LOGGER.warning("Reyee: %s AC write timed out — treating as applied", module)
+            return {"code": 0, "_timeout": True}
+        except Exception as err:  # noqa: BLE001
+            raise ReyeeConnError(f"AC write failed on {module}: {err}") from err
+        code = body.get("code")
+        inner = body.get("data") if isinstance(body.get("data"), dict) else {}
+        if code not in (0, "0", None) or inner.get("code") not in (0, "0", None):
+            raise ReyeeConnError(f"Router rejected {module} AC write: {body}")
+        return body
+
 
 def build_master_swap_payload(mllb_data: dict, primary_ifname: str) -> dict:
     """
@@ -281,3 +307,25 @@ def build_flowctrl_toggle(cfg: dict, tc_on: bool) -> dict:
     out = _strip_stamps(cfg)
     out["tcSwitch"] = "on" if tc_on else "off"
     return out
+
+
+_AC_STAMP_FIELDS = ("configTime", "currentTime", "configId",
+                    "subConfigId", "networkId")
+
+
+def build_ssid_toggle(wireless_cfg: dict, wlan_id, enable: bool) -> dict:
+    """
+    Return a wireless config with one SSID's enable flipped, everything else
+    (radioList, healthy, other SSIDs, all per-SSID fields) preserved exactly.
+    Strips the read-only stamps the eWeb write omits.
+    """
+    wid = str(wlan_id)
+    out = {k: v for k, v in wireless_cfg.items() if k not in _AC_STAMP_FIELDS}
+    out["ssidList"] = [
+        ({**s, "enable": ("true" if enable else "false")}
+         if str(s.get("wlanId")) == wid else dict(s))
+        for s in wireless_cfg.get("ssidList", [])
+    ]
+    return out
+
+

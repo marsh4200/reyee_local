@@ -1,7 +1,7 @@
 {
   "domain": "reyee_local",
   "name": "Ruijie Reyee (Local)",
-  "version": "1.7.3",
+  "version": "1.11.4",
   "documentation": "https://github.com/marsh4200/reyee_local",
   "codeowners": [
     "@marsh4200"
