@@ -86,6 +86,13 @@ Control almost everything directly from Home Assistant.
 - ✅ EG105G-V3 (ReyeeOS 2.360.x)
 - ✅ RG-EW3000GX
 
+| Model                 | Status              |
+| --------------------- | ------------------- |
+| EG105G-V3             | ✅ Tested            |
+| RG-EW3000GX           | ✅ Tested            |
+| Other ReyeeOS devices | ⚠️ Expected to work |
+
+
 Compatible with most EG-series gateways running **ReyeeOS 2.x**
 
 The integration automatically discovers:
