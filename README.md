@@ -9,21 +9,23 @@ eWeb API over your LAN — no cloud dependency.
 ## Features
 
 ### Monitoring
-- **Connected devices** count, grouped by VLAN
-- **Per-VLAN device sensors** (named from your router config, e.g. ioT / GUEST / CCTV / MAIN), with subnet, gateway, DHCP range
-- **Device trackers** — one per client, with IP address and VLAN (use for presence automations)
-- **Public WAN IP** sensor
-- **Gateway** sensor — model, firmware, serial, MAC
-- **Active WAN** + per-uplink primary/backup sensors
-- **WAN online** connectivity binary sensor
-- **Port forwards** sensor (lists all rules)
-- **Flow control** sensor (traffic control + per-WAN bandwidth)
-- **VPN clients** sensor (WireGuard)
+- **Connected devices** with real names (from the router's device remarks),
+  grouped by VLAN, marked wired/wireless, with signal and switch port
+- **Per-VLAN device sensors**, named from your router config
+- **Device trackers** — one per client, grouped under the gateway
+- **Physical port status** — live up/down, speed, duplex per port
+- **Live WAN throughput** per uplink
+- **Public WAN IP**, per-WAN IP/gateway/DNS detail
+- **WAN role** (primary/backup) + **Active WAN** sensors
+- **PPPoE drop tracking** — status, drop count, last disconnect/connect per line
+- **Switches & access points** surfaced as devices (from topology)
+- **WAN online** connectivity, port forwards, flow control, VPN clients, WiFi SSID list
 
 ### Control
-- **Primary WAN select** — switch which uplink is primary from HA
+- **Primary WAN select** — switch the active uplink
 - **Forced switch** toggle — strict primary/backup failover
-- **Flow control** switch — master bandwidth management on/off
+- **Flow control** switch — bandwidth management on/off
+- **WiFi SSID on/off** — one switch per SSID
 - **Add / remove port forward** services
 - **Refresh** and **deep probe** buttons
 
@@ -33,44 +35,32 @@ eWeb API over your LAN — no cloud dependency.
 2. Add `https://github.com/marsh4200/ruijie_reyee` as category **Integration**
 3. Install **Ruijie Reyee (Local)**, then restart Home Assistant
 4. **Settings → Devices & Services → Add Integration → Ruijie Reyee (Local)**
-5. Enter the gateway IP (e.g. `192.168.110.1`), username (`admin`) and password
-
-## Manual installation
-
-Copy `custom_components/reyee_local/` into your HA `config/custom_components/`
-directory and restart.
+5. Enter the gateway IP, username (`admin`) and password
 
 ## Services
 
 | Service | What it does |
 |---|---|
-| `reyee_local.set_primary_wan` | Make a WAN interface (`wan` / `wan1`) the primary uplink |
-| `reyee_local.set_forced_switch` | Turn strict primary/backup failover on/off |
+| `reyee_local.set_primary_wan` | Make a WAN interface the primary uplink |
+| `reyee_local.set_forced_switch` | Strict primary/backup failover on/off |
+| `reyee_local.set_ssid` | Enable/disable a WiFi SSID by wlan_id |
 | `reyee_local.add_port_forward` | Add or replace a port-forwarding rule |
 | `reyee_local.remove_port_forward` | Remove a port-forwarding rule by name |
 | `reyee_local.deep_probe` | Diagnostic sweep of the router's local API |
 
 ## How it works
 
-The Reyee eWeb API is a LuCI JSON-RPC endpoint:
-
-- Login: `POST /cgi-bin/luci/api/auth` — password is AES-256-CBC encrypted
-  (OpenSSL "Salted__" format, MD5 KDF) and returned as a session id (`sid`).
-- Everything else: `POST /cgi-bin/luci/api/cmd?auth=<sid>` with
-  `devSta.get` (runtime state) and `devConfig.get` / `devConfig.set` (config).
-  Success is `rcode: "00000000"`.
-
-Data sources confirmed on EG105G-V3: `arp` (clients), `network` (VLANs),
-`mllb` (WAN load-balance), `port_mapping` (forwards), `flowctrl` (bandwidth),
-`sysinfo`, `wireguard`.
+The Reyee eWeb API is a LuCI JSON-RPC endpoint. Login is AES-256-CBC encrypted
+("Salted__" format, MD5 KDF), returning a session id. Runtime data comes from
+`devSta.get`, config from `devConfig.get` / `devConfig.set`, and the wireless
+controller from `acConfig.get` / `acConfig.set`. Every data source is
+auto-discovered — no values are hardcoded to one unit.
 
 ## Notes & limitations
 
-- The EG105G-V3 has **no built-in Wi-Fi** and its local API exposes **no
-  per-port (G1/G2) status** — that data isn't available on this hardware.
-  Wi-Fi client detail lives on your APs / Ruijie Cloud.
-- Config writes are applied asynchronously; the gateway may drop the
-  management path briefly while it reconverges (handled as success).
+- Config writes apply asynchronously; the gateway may briefly drop the
+  management path while reconverging (handled as success).
+- Topology online/offline updates on the router's own cache cycle.
 - Not affiliated with or endorsed by Ruijie Networks. "Ruijie" and "Reyee"
   are trademarks of Ruijie Networks Co., Ltd.
 
