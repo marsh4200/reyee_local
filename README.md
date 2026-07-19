@@ -1,127 +1,235 @@
-# Ruijie Reyee (Local) for Home Assistant
+# 🌐 Ruijie Reyee (Local) for Home Assistant
 
-A local-polling Home Assistant integration for Ruijie Reyee **EG-series
-gateways**. It talks directly to the device's on-box eWeb API over your LAN —
-no cloud account, no Ruijie Cloud dependency.
+<p align="center">
 
-**Tested on:** EG105G-V3, ReyeeOS 2.360.x. Other EG models running ReyeeOS 2.x
-should work; the integration auto-discovers VLANs, WAN uplinks, ports and
-downstream devices rather than hardcoding them.
+**Complete local control for Ruijie Reyee EG Series Gateways**
 
-[![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-![version](https://img.shields.io/badge/version-1.15.0-blue.svg)
+No cloud • No subscriptions • Direct LAN communication
 
----
+[![Version](https://img.shields.io/badge/version-v1.15.0-2ea44f?style=for-the-badge)]()
+[![Home Assistant](https://img.shields.io/badge/Home_Assistant-Compatible-41BDF5?style=for-the-badge&logo=homeassistant)]()
+[![HACS](https://img.shields.io/badge/HACS-Custom-orange?style=for-the-badge)](https://github.com/hacs/integration)
+[![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)]()
 
-## What it does
-
-### Monitoring (sensors)
-- **Connected devices** — total count, with each client's real name (pulled
-  from the router's device remarks), IP, VLAN, wired/wireless, signal, and
-  switch port
-- **Per-VLAN device counts** — named from your router config (e.g. ioT / GUEST
-  / CCTV / MAIN)
-- **Device trackers** — one per client, grouped under the gateway, usable for
-  presence automations
-- **Physical ports** — live up/down, speed and duplex per port
-- **WAN throughput** — live up/down per uplink
-- **Public IP** and per-WAN IP / gateway / DNS
-- **WAN role** (primary/backup) and **Active WAN**
-- **PPPoE drop tracking** — status, drop count, last disconnect/connect per line
-- **Network devices** — downstream switches and APs, surfaced as their own
-  devices with online status
-- **WiFi SSID list**, port-forward list, flow-control state, VPN clients
-
-### Control
-- **Primary WAN** select — switch the active uplink
-- **Forced switch** — strict primary/backup failover
-- **Flow control** — bandwidth management on/off
-- **WiFi rate limit** — global per-station upload/download caps
-- **WiFi SSID** on/off — one switch per SSID
-- **Device LEDs** — on/off per access point and the gateway
-- **Port forwarding** — add/remove rules
-- **Device internet block** — block/unblock a client by MAC
-
-### Buttons
-- **Refresh** — force an immediate poll
-- **Deep probe** — diagnostic sweep of the router's local API (disabled by
-  default)
+</p>
 
 ---
 
-## Installation
+## ✨ Overview
 
-### HACS (recommended)
-1. HACS → **Integrations** → three-dot menu → **Custom repositories**
-2. Add `https://github.com/marsh4200/ruijie_reyee`, category **Integration**
-3. Install **Ruijie Reyee (Local)**, then restart Home Assistant
-4. **Settings → Devices & Services → Add Integration → Ruijie Reyee (Local)**
-5. Enter the gateway IP (e.g. `192.168.88.1`), username (`admin`) and password
+Ruijie Reyee (Local) is a **fully local** Home Assistant integration for
+**Reyee EG-series gateways**.
 
-### Manual
-Copy `custom_components/reyee_local/` into your HA `config/custom_components/`
-directory and restart.
+Unlike the official cloud integration, this connects **directly to your
+gateway** using the built-in eWeb API over your LAN.
 
----
+✔ No Cloud Account
 
-## Services
+✔ No Internet Required
 
-| Service | Description |
-|---|---|
-| `reyee_local.set_primary_wan` | Make a WAN interface (`wan` / `wan1`) the primary uplink |
-| `reyee_local.set_forced_switch` | Strict primary/backup failover on/off |
-| `reyee_local.set_ssid` | Enable/disable a WiFi SSID by `wlan_id` |
-| `reyee_local.set_rate_limit` | Global wireless up/down rate cap (kbps, 0 = unlimited) |
-| `reyee_local.block_device` | Block a device (by MAC) from the internet |
-| `reyee_local.unblock_device` | Remove a device's internet block |
-| `reyee_local.add_port_forward` | Add or replace a port-forwarding rule |
-| `reyee_local.remove_port_forward` | Remove a port-forwarding rule by name |
-| `reyee_local.deep_probe` | Diagnostic sweep, posts results as a notification |
+✔ Real-time Monitoring
+
+✔ Full Network Control
+
+✔ Automatic Discovery
 
 ---
 
-## Options
+# 🚀 Features
 
-Set the polling interval (10–300 s) via **Configure** on the integration.
+## 📊 Network Monitoring
 
----
-
-## How it works
-
-The Reyee eWeb API is a LuCI JSON-RPC endpoint at `/cgi-bin/luci/api/`:
-
-- **Login** — `POST /api/auth`. The password is AES-256-CBC encrypted
-  (OpenSSL "Salted__" framing, MD5 key derivation) and exchanged for a session
-  id (`sid`).
-- **Everything else** — `POST /api/cmd?auth=<sid>` with `devSta.get` (runtime
-  state), `devConfig.get` / `devConfig.set` (config), and `acConfig.get` /
-  `acConfig.set` (the wireless controller). Success is `rcode: "00000000"` or
-  `code: 0`.
-
-Config writes are applied asynchronously; the gateway may briefly drop the
-management path while it reconverges, which the integration treats as success
-and then re-reads to confirm.
+- 👥 Connected device list with friendly names
+- 📍 Device Trackers for every client
+- 🌐 VLAN discovery with named networks
+- 🔌 Live Ethernet port status
+- 📶 WAN upload/download throughput
+- 🌍 Public IP monitoring
+- 🔄 PPPoE reconnect tracking
+- 📡 Connected APs and switches
+- 📶 WiFi SSID monitoring
+- 🔐 VPN client status
+- 🔀 Active WAN detection
+- 🌐 Port forwarding list
 
 ---
 
-## Notes & limitations
+## 🎛 Control
 
-- The EG105G-V3 has **no built-in WiFi** — wireless data (SSIDs, clients, rate
-  limits, per-AP LEDs) is read from the on-box AC controller that manages your
-  Reyee APs.
-- Some access points may appear labelled by serial rather than name where the
-  router's cached topology and live device lists disagree; rename them in the
-  HA UI if desired.
-- Topology online/offline status updates on the router's own cache cycle, not
-  instantly.
-- Home Assistant sorts the Devices list alphabetically; the gateway is named
-  with a leading IP so it sorts to the top.
+Control almost everything directly from Home Assistant.
+
+| Feature | Supported |
+|----------|-----------|
+| 🌐 Primary WAN Switching | ✅ |
+| 🔄 Forced WAN Failover | ✅ |
+| 📶 WiFi SSID Enable/Disable | ✅ |
+| 🚦 Flow Control | ✅ |
+| ⚡ WiFi Rate Limiting | ✅ |
+| 💡 Gateway LEDs | ✅ |
+| 💡 AP LEDs | ✅ |
+| 🚫 Block Internet Access | ✅ |
+| 🌍 Port Forward Management | ✅ |
 
 ---
 
-## Disclaimer
+## ⚙ Buttons
 
-Provided as-is under the MIT license. You are responsible for any changes made
-to your own network equipment through this integration. Not affiliated with or
-endorsed by Ruijie Networks. "Ruijie" and "Reyee" are trademarks of Ruijie
-Networks Co., Ltd.
+- 🔄 Refresh Router
+- 🔍 Deep API Probe
+
+---
+
+# 🖥 Supported Hardware
+
+Tested on
+
+✅ EG105G-V3
+
+Compatible with most EG-series gateways running **ReyeeOS 2.x**
+
+The integration automatically discovers:
+
+- VLANs
+- WAN Interfaces
+- Ethernet Ports
+- Access Points
+- Switches
+- Clients
+
+No model-specific configuration required.
+
+---
+
+# 📦 Installation
+
+## HACS (Recommended)
+
+1. Open **HACS**
+2. Integrations
+3. ⋮ → **Custom Repositories**
+4. Add
+
+```
+https://github.com/marsh4200/ruijie_reyee
+```
+
+Category:
+
+```
+Integration
+```
+
+Restart Home Assistant.
+
+Then:
+
+```
+Settings
+→ Devices & Services
+→ Add Integration
+→ Ruijie Reyee (Local)
+```
+
+Enter:
+
+- Gateway IP
+- Username
+- Password
+
+---
+
+## Manual Installation
+
+Copy
+
+```
+custom_components/reyee_local/
+```
+
+into
+
+```
+config/custom_components/
+```
+
+Restart Home Assistant.
+
+---
+
+# 🛠 Services
+
+| Service | Purpose |
+|-----------|----------|
+| `set_primary_wan` | Switch Primary WAN |
+| `set_forced_switch` | Enable/Disable Failover |
+| `set_ssid` | Enable or Disable SSIDs |
+| `set_rate_limit` | Wireless Speed Limits |
+| `block_device` | Block Internet Access |
+| `unblock_device` | Remove Internet Block |
+| `add_port_forward` | Create Port Forward |
+| `remove_port_forward` | Delete Port Forward |
+| `deep_probe` | Advanced API Diagnostics |
+
+---
+
+# ⚡ Polling
+
+Polling interval is configurable between
+
+**10–300 seconds**
+
+from the Integration Configure menu.
+
+---
+
+# 🔒 How It Works
+
+The integration communicates directly with the gateway's built-in **eWeb API**.
+
+```
+/cgi-bin/luci/api/
+```
+
+Authentication uses the same encrypted login process as the official web
+interface.
+
+Configuration changes are written locally and automatically verified after the
+gateway applies them.
+
+No telemetry.
+
+No cloud.
+
+No external services.
+
+---
+
+# ⚠ Notes
+
+- EG105G-V3 has **no built-in WiFi**. Wireless information is collected from the integrated AP Controller.
+- Some APs may display their serial number if topology information is incomplete.
+- Device status depends on the gateway's topology refresh interval.
+- The gateway device is prefixed with its IP address so it stays at the top of Home Assistant's device list.
+
+---
+
+# ❤️ Why This Integration?
+
+Unlike cloud-based solutions, this integration provides:
+
+- 🏠 100% Local
+- ⚡ Faster Updates
+- 🔒 Better Privacy
+- 🌐 Works Without Internet
+- 🚀 Native Home Assistant Entities
+- 🔧 Nearly Every Router Feature Exposed
+
+---
+
+# 📄 License
+
+Released under the **MIT License**.
+
+This project is **not affiliated with or endorsed by Ruijie Networks**.
+
+"Ruijie" and "Reyee" are trademarks of Ruijie Networks Co., Ltd.
