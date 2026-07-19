@@ -81,9 +81,10 @@ Control almost everything directly from Home Assistant.
 
 # 🖥 Supported Hardware
 
-Tested on
+## Tested Hardware
 
-✅ EG105G-V3
+- ✅ EG105G-V3 (ReyeeOS 2.360.x)
+- ✅ RG-EW3000GX
 
 Compatible with most EG-series gateways running **ReyeeOS 2.x**
 
