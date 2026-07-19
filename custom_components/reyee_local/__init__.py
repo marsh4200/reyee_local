@@ -30,7 +30,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     sys = (coordinator.data or {}).get("sysinfo", {})
     if sys:
         model = sys.get("model") or sys.get("product_class") or "EG Series"
-        gw_name = f"Reyee {model}"
+        # Lead the name with the host/IP so it sorts to the top of HA's
+        # alphabetical device list (numbers sort before letters).
+        gw_name = f"{entry.data[CONF_HOST]} Reyee {model}"
+
+        # Retitle the auto-generated title (IP-only or plain "Reyee <model>")
+        # to the IP-first form. Never override a name the user chose.
+        old_titles = {
+            f"Reyee {entry.data[CONF_HOST]}",
+            f"Reyee {model}",
+        }
+        if entry.title in old_titles:
+            hass.config_entries.async_update_entry(entry, title=gw_name)
 
         registry = dr.async_get(hass)
         device = registry.async_get_or_create(
@@ -45,8 +56,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         if sys.get("sys_mac") else set(),
             configuration_url=f"http://{entry.data[CONF_HOST]}",
         )
-        # If an earlier version created this device with a fallback name
-        # (e.g. "Reyee EG Series"), correct it now that we know the model —
+        # Correct an earlier fallback name now that we know the model —
         # but never override a name the user set themselves.
         if device.name_by_user is None and device.name != gw_name:
             registry.async_update_device(device.id, name=gw_name)
@@ -96,6 +106,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         for coord in _coords():
             await coord.async_set_ssid_enabled(wlan_id, enabled)
 
+    async def _block_device(call: ServiceCall):
+        for coord in _coords():
+            await coord.async_block_device(call.data["mac"], call.data.get("name"))
+
+    async def _unblock_device(call: ServiceCall):
+        for coord in _coords():
+            await coord.async_unblock_device(call.data["mac"])
+
+    async def _set_rate_limit(call: ServiceCall):
+        up = call.data.get("upload_kbps", 0)
+        down = call.data.get("download_kbps", 0)
+        for coord in _coords():
+            await coord.async_set_rate_limit(up, down)
+
     if not hass.services.has_service(DOMAIN, "deep_probe"):
         hass.services.async_register(DOMAIN, "deep_probe", _deep_probe)
         hass.services.async_register(
@@ -129,6 +153,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 vol.Required("enabled"): cv.boolean,
             }),
         )
+        hass.services.async_register(
+            DOMAIN, "block_device", _block_device,
+            schema=vol.Schema({
+                vol.Required("mac"): cv.string,
+                vol.Optional("name"): cv.string,
+            }),
+        )
+        hass.services.async_register(
+            DOMAIN, "unblock_device", _unblock_device,
+            schema=vol.Schema({vol.Required("mac"): cv.string}),
+        )
+        hass.services.async_register(
+            DOMAIN, "set_rate_limit", _set_rate_limit,
+            schema=vol.Schema({
+                vol.Optional("upload_kbps", default=0): vol.Coerce(int),
+                vol.Optional("download_kbps", default=0): vol.Coerce(int),
+            }),
+        )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
@@ -145,6 +187,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN].pop(entry.entry_id, None)
         if not hass.data[DOMAIN]:
             for svc in ("deep_probe", "set_primary_wan", "set_forced_switch",
-                        "add_port_forward", "remove_port_forward", "set_ssid"):
+                        "add_port_forward", "remove_port_forward", "set_ssid",
+                        "block_device", "unblock_device", "set_rate_limit"):
                 hass.services.async_remove(DOMAIN, svc)
     return unloaded

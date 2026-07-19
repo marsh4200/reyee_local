@@ -2,6 +2,7 @@
 import logging
 
 from homeassistant.components.switch import SwitchEntity
+from homeassistant.const import EntityCategory
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -16,6 +17,21 @@ async def async_setup_entry(hass, entry, async_add_entities):
         ReyeeForcedSwitch(coordinator, entry),
         ReyeeFlowControlSwitch(coordinator, entry),
     ])
+
+    seen_leds = set()
+
+    def _add_leds():
+        new = []
+        for d in (coordinator.data or {}).get("led_devices", []):
+            sn = d.get("sn")
+            if sn and sn not in seen_leds:
+                seen_leds.add(sn)
+                new.append(ReyeeDeviceLedSwitch(coordinator, entry, sn))
+        if new:
+            async_add_entities(new)
+
+    _add_leds()
+    entry.async_on_unload(coordinator.async_add_listener(_add_leds))
 
     seen_ssids = set()
 
@@ -132,3 +148,49 @@ class ReyeeSsidSwitch(CoordinatorEntity, SwitchEntity):
 
     async def async_turn_off(self, **kwargs):
         await self.coordinator.async_set_ssid_enabled(self._wid, False)
+
+
+class ReyeeDeviceLedSwitch(CoordinatorEntity, SwitchEntity):
+    """LED on/off for one Reyee device, targeted by serial (auto-detected)."""
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator, entry, serial):
+        super().__init__(coordinator)
+        self._sn = serial
+        self._attr_unique_id = f"{entry.entry_id}_led_{serial}"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry.entry_id)},
+            manufacturer="Ruijie",
+            name=entry.title,
+            configuration_url=f"http://{entry.data['host']}",
+        )
+
+    def _dev(self):
+        for d in (self.coordinator.data or {}).get("led_devices", []):
+            if d.get("sn") == self._sn:
+                return d
+        return {}
+
+    @property
+    def name(self):
+        d = self._dev()
+        label = d.get("name") or f"Device {self._sn[-4:]}"
+        return f"Reyee LED {label}"
+
+    @property
+    def is_on(self):
+        return self._sn not in (self.coordinator.data or {}).get("led_off_serials", [])
+
+    @property
+    def icon(self):
+        return "mdi:led-on" if self.is_on else "mdi:led-off"
+
+    @property
+    def extra_state_attributes(self):
+        return {"serial": self._sn, "device": self._dev().get("name")}
+
+    async def async_turn_on(self, **kwargs):
+        await self.coordinator.async_set_device_led(self._sn, True)
+
+    async def async_turn_off(self, **kwargs):
+        await self.coordinator.async_set_device_led(self._sn, False)

@@ -7,4 +7,4 @@ CONF_SCAN_INTERVAL = "scan_interval"
 
 DEFAULT_SCAN_INTERVAL = 30
 
-PLATFORMS = ["sensor", "binary_sensor", "device_tracker", "select", "switch", "button"]
+PLATFORMS = ["sensor", "binary_sensor", "device_tracker", "select", "switch", "button", "number"]

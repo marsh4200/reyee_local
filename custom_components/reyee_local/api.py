@@ -252,6 +252,31 @@ class ReyeeLocalAPI:
             raise ReyeeConnError(f"Router rejected {module} AC write: {body}")
         return body
 
+    async def _cmd_write(self, method, module, data, timeout=60):
+        """Generic write dispatcher for devConfig.add/del and acConfig.update."""
+        if not self.sid:
+            await self.login()
+        base = self._base or await self._resolve_base()
+        params = {"module": module, "noParse": False, "async": None,
+                  "remoteIp": False, "device": "pc", "data": data}
+        payload = {"id": self._next_id(), "method": method, "params": params}
+        try:
+            async with async_timeout.timeout(timeout):
+                async with self.session.post(
+                    f"{base}/cgi-bin/luci/api/cmd?auth={self.sid}",
+                    json=payload, ssl=False,
+                ) as resp:
+                    body = await resp.json(content_type=None)
+        except asyncio.TimeoutError:
+            _LOGGER.warning("Reyee: %s %s timed out — treating as applied", method, module)
+            return {"code": 0, "_timeout": True}
+        except Exception as err:  # noqa: BLE001
+            raise ReyeeConnError(f"{method} {module} failed: {err}") from err
+        rcode = str(body.get("rcode", "") or "")
+        if rcode and rcode != _OK_RCODE and body.get("code") not in (0, "0", None):
+            raise ReyeeConnError(f"Router rejected {method} {module}: {body}")
+        return body
+
 
 def build_master_swap_payload(mllb_data: dict, primary_ifname: str) -> dict:
     """
@@ -329,3 +354,37 @@ def build_ssid_toggle(wireless_cfg: dict, wlan_id, enable: bool) -> dict:
     return out
 
 
+
+
+def build_rate_limit(up_kbps, down_kbps) -> dict:
+    """Global wireless per-station rate limit (0 = unlimited). acConfig.update wqos."""
+    return {"ap_persta": {"ul": str(int(up_kbps)), "dl": str(int(down_kbps))}}
+
+
+def build_block_rule(mac: str, name: str) -> dict:
+    """A REJECT access-control rule blocking a MAC from lan->wan. devConfig.add access_ctrl."""
+    return {"list": [{
+        "enable": "1", "netProto": "ipv4", "log": "0", "state": "1,4",
+        "by": "mac", "mac": mac, "src": "lan", "dest": "wan",
+        "srcIP": "", "destIP": "", "srcPort": "", "destPort": "",
+        "proto": "all", "target": "REJECT",
+        "tmngtName": "\u6240\u6709\u65f6\u6bb5",  # "all time periods"
+        "ruleName": name, "userGroupList": [],
+    }]}
+
+
+def build_led_toggle(on: bool) -> dict:
+    """All-device LED control. acConfig.set devLed. restore=on, close=off."""
+    return {"led_all": "restore" if on else "close", "list": []}
+
+
+def build_led_per_device(off_serials) -> dict:
+    """
+    Per-device LED control. Top-level led_all='restore' keeps everything on,
+    and each serial in `off_serials` is switched off via the list.
+    acConfig.set devLed.
+    """
+    return {
+        "led_all": "restore",
+        "list": [{"sn": sn, "led_all": "close"} for sn in off_serials],
+    }

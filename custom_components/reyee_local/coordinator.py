@@ -21,7 +21,8 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .const import DOMAIN, DEFAULT_SCAN_INTERVAL, CONF_SCAN_INTERVAL
 from .api import (ReyeeAuthError, ReyeeConnError, build_master_swap_payload,
                   build_portmap_add, build_portmap_remove, build_flowctrl_toggle,
-                  build_ssid_toggle)
+                  build_ssid_toggle, build_rate_limit, build_block_rule,
+                  build_led_toggle, build_led_per_device)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -380,6 +381,85 @@ class ReyeeCoordinator(DataUpdateCoordinator):
             _LOGGER.warning("Reyee wireless read failed: %s", err)
         _LOGGER.info("Reyee [v1.11.4] parsed %d ssids", len(ssids))
 
+        # ── WiFi rate limit (wqos) + access-control blocks (read, guarded) ─
+        rate_limit = {"ul": "0", "dl": "0"}
+        try:
+            wq = await self.api.raw_cmd("acConfig.get", "wqos", data={"groupId": "0"})
+            wqd = wq.get("data") if isinstance(wq, dict) else None
+            if isinstance(wqd, list) and wqd:
+                wqd = wqd[0]
+            if isinstance(wqd, dict) and isinstance(wqd.get("ap_persta"), dict):
+                ap = wqd["ap_persta"]
+                rate_limit = {"ul": ap.get("ul", "0"), "dl": ap.get("dl", "0")}
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Reyee wqos read failed: %s", err)
+
+        led_on = True
+        led_off_serials = set()
+        led_default_close = False
+        try:
+            led = await self.api.raw_cmd("acConfig.get", "devLed", data={"groupId": "0"})
+            ledd = led.get("data") if isinstance(led, dict) else None
+            if isinstance(ledd, dict):
+                led_default_close = ledd.get("led_all") == "close"
+                led_on = not led_default_close
+                for item in ledd.get("list", []) or []:
+                    if isinstance(item, dict) and item.get("sn"):
+                        # With default 'restore', a listed 'close' means that
+                        # device is OFF. With default 'close', a listed
+                        # 'restore' means that device is ON (others off).
+                        if item.get("led_all") == "close":
+                            led_off_serials.add(item["sn"])
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Reyee devLed read failed: %s", err)
+
+        # Authoritative controllable-device list for LED targeting —
+        # APs come from enetCap (the full AP list), gateway from sysinfo.
+        # All auto-detected from the router, never hardcoded.
+        led_devices = []
+        try:
+            name_by_sn = {n.get("sn"): n.get("name") for n in topo if n.get("sn")}
+            type_by_sn = {n.get("sn"): n.get("type") for n in topo if n.get("sn")}
+
+            # Gateway (the EG box itself)
+            gw_sn = sysinfo.get("serial_num")
+            if gw_sn:
+                led_devices.append({
+                    "sn": gw_sn,
+                    "name": name_by_sn.get(gw_sn) or "Gateway",
+                    "type": "gateway",
+                })
+
+            # All access points from enetCap
+            enet = await self.api.raw_cmd(
+                "devSta.get", "enetCap",
+                data={"obj": {"rg_device": {"wireless": ["ap_sta_max"]}}, "sn": []})
+            enetd = enet.get("data") if isinstance(enet, dict) else None
+            rows = enetd.get("data") if isinstance(enetd, dict) else None
+            for item in (rows or []):
+                sn = item.get("sn")
+                if sn and sn != gw_sn:
+                    led_devices.append({
+                        "sn": sn,
+                        "name": name_by_sn.get(sn),
+                        "type": type_by_sn.get(sn) or "AP",
+                    })
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Reyee enetCap read failed: %s", err)
+
+        blocks = []
+        try:
+            ac = await self.api.raw_cmd("devConfig.get", "access_ctrl")
+            acd = ac.get("data", ac) if isinstance(ac, dict) else {}
+            for r in (acd.get("list", []) if isinstance(acd, dict) else []):
+                if r.get("target") == "REJECT":
+                    blocks.append({
+                        "mac": r.get("mac"), "name": r.get("ruleName"),
+                        "uuid": r.get("uuid"), "enabled": r.get("enable") == "1",
+                    })
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Reyee access_ctrl read failed: %s", err)
+
         # port forwards + flow control (confirmed writable)
         pm = await self._cfg("port_mapping")
         pm_data = pm.get("data", pm) if isinstance(pm, dict) else {}
@@ -407,6 +487,12 @@ class ReyeeCoordinator(DataUpdateCoordinator):
             "ssids": ssids,
             "ssids_debug": _ssid_debug,
             "pppoe_debug": _pppoe_debug,
+            "rate_limit": rate_limit,
+            "blocks": blocks,
+            "led_on": led_on,
+            "led_off_serials": sorted(led_off_serials),
+            "led_default_close": led_default_close,
+            "led_devices": led_devices,
         }
 
     # ── Writes (unchanged) ───────────────────────────────────────────────
@@ -451,6 +537,54 @@ class ReyeeCoordinator(DataUpdateCoordinator):
             raise ReyeeConnError("Could not read current flowctrl")
         data = cfg.get("data", cfg) if isinstance(cfg, dict) else {}
         await self.api.set_config("flowctrl", build_flowctrl_toggle(data, enabled))
+        await self.async_request_refresh()
+
+    async def async_set_rate_limit(self, up_kbps, down_kbps):
+        """Set the global wireless per-station rate limit (0 = unlimited)."""
+        await self.api._cmd_write(
+            "acConfig.update", "wqos", build_rate_limit(up_kbps, down_kbps))
+        _LOGGER.info("Reyee: wifi rate limit set up=%s dl=%s", up_kbps, down_kbps)
+        await self.async_request_refresh()
+
+    async def async_set_leds(self, on: bool):
+        """Turn all device LEDs on (restore) or off (close)."""
+        await self.api.set_ac_config("devLed", build_led_toggle(on))
+        _LOGGER.info("Reyee: LEDs %s", "on" if on else "off")
+        await self.async_request_refresh()
+
+    async def async_set_device_led(self, serial: str, on: bool):
+        """Turn one device's LED on/off, preserving the state of the others.
+
+        Model: top-level led_all='restore' (all on by default) with a list of
+        exceptions set to 'close' (off). We keep the full off-set and rewrite it.
+        """
+        off = set((self.data or {}).get("led_off_serials", []))
+        if on:
+            off.discard(serial)
+        else:
+            off.add(serial)
+        await self.api.set_ac_config("devLed", build_led_per_device(sorted(off)))
+        _LOGGER.info("Reyee: LED %s -> %s", serial, "on" if on else "off")
+        await self.async_request_refresh()
+
+    async def async_block_device(self, mac, name=None):
+        """Block a device (MAC) from reaching the internet."""
+        rule_name = (name or mac).replace(":", "")[:32]
+        await self.api._cmd_write(
+            "devConfig.add", "access_ctrl", build_block_rule(mac, rule_name))
+        _LOGGER.info("Reyee: blocked %s", mac)
+        await self.async_request_refresh()
+
+    async def async_unblock_device(self, mac):
+        """Remove the block rule(s) for a MAC by uuid."""
+        ac = await self.api.raw_cmd("devConfig.get", "access_ctrl")
+        acd = ac.get("data", ac) if isinstance(ac, dict) else {}
+        uuids = [r.get("uuid") for r in (acd.get("list", []) if isinstance(acd, dict) else [])
+                 if r.get("mac", "").lower() == mac.lower() and r.get("uuid")]
+        if not uuids:
+            raise ReyeeConnError(f"No block rule found for {mac}")
+        await self.api._cmd_write("devConfig.del", "access_ctrl", {"uuid": uuids})
+        _LOGGER.info("Reyee: unblocked %s (%d rules)", mac, len(uuids))
         await self.async_request_refresh()
 
     async def async_set_ssid_enabled(self, wlan_id, enabled: bool):

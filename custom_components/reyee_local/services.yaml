@@ -114,3 +114,54 @@ set_ssid:
       required: true
       selector:
         boolean:
+
+block_device:
+  name: Block device internet
+  description: Block a device (by MAC) from reaching the internet (access_ctrl REJECT rule).
+  fields:
+    mac:
+      name: MAC address
+      required: true
+      example: "a8:48:fa:f0:08:be"
+      selector:
+        text:
+    name:
+      name: Rule name
+      required: false
+      example: Kids tablet
+      selector:
+        text:
+
+unblock_device:
+  name: Unblock device internet
+  description: Remove the internet block for a device (by MAC).
+  fields:
+    mac:
+      name: MAC address
+      required: true
+      example: "a8:48:fa:f0:08:be"
+      selector:
+        text:
+
+set_rate_limit:
+  name: Set WiFi rate limit
+  description: Global wireless per-station rate cap in kbps (0 = unlimited).
+  fields:
+    upload_kbps:
+      name: Upload limit (kbps)
+      required: false
+      example: 5000
+      selector:
+        number:
+          min: 0
+          max: 1000000
+          mode: box
+    download_kbps:
+      name: Download limit (kbps)
+      required: false
+      example: 10000
+      selector:
+        number:
+          min: 0
+          max: 1000000
+          mode: box
