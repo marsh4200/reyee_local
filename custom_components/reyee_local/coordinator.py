@@ -13,7 +13,6 @@ Confirmed sources (from live eWeb capture):
   devConfig.get network / mllb                                → VLANs / WAN uplinks
 """
 import ipaddress
-import json
 import logging
 from datetime import timedelta
 
@@ -40,27 +39,9 @@ def _norm_mac(m):
 
 
 def _clean_name(n):
-    if n is None:
-        return None
-    n = str(n).strip()
-    if n and n.lower() not in _JUNK_NAMES:
-        return n
+    if n and n.strip().lower() not in _JUNK_NAMES:
+        return n.strip()
     return None
-
-
-def _unwrap(r):
-    """Unwrap a raw_cmd body. noParse replies can carry .data as a JSON string."""
-    if not isinstance(r, dict):
-        return r
-    d = r.get("data")
-    if isinstance(d, str) and d.strip()[:1] in ("{", "["):
-        try:
-            d = json.loads(d)
-        except ValueError:
-            d = None
-    if isinstance(d, (dict, list)):
-        return d
-    return r
 
 
 def _is_error(r):
@@ -90,8 +71,6 @@ class ReyeeCoordinator(DataUpdateCoordinator):
                          update_interval=timedelta(seconds=interval))
         self.api = api
         self.entry = entry
-        # Last good name per MAC, so one failed poll doesn't flip names to MACs.
-        self._name_cache = {}
 
     async def _get(self, module, data=None):
         """Proven path (devSta.get, unwrapped) for classic modules."""
@@ -128,7 +107,9 @@ class ReyeeCoordinator(DataUpdateCoordinator):
             if _is_error(r):
                 return None
             # raw_cmd returns the full body; unwrap a .data wrapper if present
-            return _unwrap(r)
+            if isinstance(r, dict) and isinstance(r.get("data"), (dict, list)):
+                return r["data"]
+            return r
         except Exception:  # noqa: BLE001
             return None
 
@@ -137,7 +118,9 @@ class ReyeeCoordinator(DataUpdateCoordinator):
             r = await self.api.raw_cmd("devConfig.get", module, data=data, no_parse=no_parse)
             if _is_error(r):
                 return None
-            return _unwrap(r)
+            if isinstance(r, dict) and isinstance(r.get("data"), (dict, list)):
+                return r["data"]
+            return r
         except Exception:  # noqa: BLE001
             return None
 
@@ -233,17 +216,12 @@ class ReyeeCoordinator(DataUpdateCoordinator):
         # ── Real client list, custom names, live per-IP rate ──────────────
         ul = await self._getx("user_list",
                              {"devType": "all", "dataType": "timely"})
-        user_list = (ul.get("list", []) if isinstance(ul, dict)
-                     else ul if isinstance(ul, list) else [])
-        if not user_list:
-            _LOGGER.debug("Reyee user_list returned no clients: %s", str(ul)[:300])
+        user_list = ul.get("list", []) if isinstance(ul, dict) else []
 
         remark_cfg = await self._cfgx("devRemark")
         remark = {}
-        remark_list = (remark_cfg.get("list", []) if isinstance(remark_cfg, dict)
-                       else remark_cfg if isinstance(remark_cfg, list) else [])
-        if remark_list:
-            for e in remark_list:
+        if isinstance(remark_cfg, dict):
+            for e in remark_cfg.get("list", []):
                 nm = _clean_name(e.get("name"))
                 if nm:
                     remark[_norm_mac(e.get("mac"))] = nm
@@ -277,13 +255,7 @@ class ReyeeCoordinator(DataUpdateCoordinator):
             name = (remark.get(mac)
                     or _clean_name(u.get("deviceAliasName"))
                     or _clean_name(u.get("hostName"))
-                    or _clean_name(u.get("hostname"))
-                    or _clean_name(u.get("devName"))
-                    or _clean_name(u.get("name")))
-            if name:
-                self._name_cache[mac] = name
-            else:
-                name = self._name_cache.get(mac) or mac.upper()
+                    or mac.upper())
             ctype = u.get("connectType")
             rate = rate_by_ip.get(ip, {})
             return {
