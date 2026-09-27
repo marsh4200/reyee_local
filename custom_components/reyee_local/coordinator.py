@@ -13,6 +13,7 @@ Confirmed sources (from live eWeb capture):
   devConfig.get network / mllb                                → VLANs / WAN uplinks
 """
 import ipaddress
+import json
 import logging
 from datetime import timedelta
 
@@ -42,6 +43,24 @@ def _clean_name(n):
     if n and n.strip().lower() not in _JUNK_NAMES:
         return n.strip()
     return None
+
+
+def _list_of(r):
+    """Pull `list` out of a reply, tolerating JSON-string or double-nested data."""
+    for _ in range(3):
+        if isinstance(r, str):
+            try:
+                r = json.loads(r)
+            except ValueError:
+                return []
+        if isinstance(r, list):
+            return r
+        if not isinstance(r, dict):
+            return []
+        if isinstance(r.get("list"), list):
+            return r["list"]
+        r = r.get("data")
+    return []
 
 
 def _is_error(r):
@@ -216,12 +235,12 @@ class ReyeeCoordinator(DataUpdateCoordinator):
         # ── Real client list, custom names, live per-IP rate ──────────────
         ul = await self._getx("user_list",
                              {"devType": "all", "dataType": "timely"})
-        user_list = ul.get("list", []) if isinstance(ul, dict) else []
+        user_list = _list_of(ul)
 
         remark_cfg = await self._cfgx("devRemark")
         remark = {}
-        if isinstance(remark_cfg, dict):
-            for e in remark_cfg.get("list", []):
+        for e in _list_of(remark_cfg):
+            if isinstance(e, dict):
                 nm = _clean_name(e.get("name"))
                 if nm:
                     remark[_norm_mac(e.get("mac"))] = nm
@@ -242,7 +261,8 @@ class ReyeeCoordinator(DataUpdateCoordinator):
         vlans = self._parse_networks(net_cfg)
 
         # ── Merge: ARP (coverage) + user_list (rich) + remark (names) ─────
-        ul_by_mac = {_norm_mac(u.get("mac")): u for u in user_list if u.get("mac")}
+        ul_by_mac = {_norm_mac(u.get("mac")): u for u in user_list
+                     if isinstance(u, dict) and u.get("mac")}
         clients = []
         vlan_counts = {}
         seen = set()

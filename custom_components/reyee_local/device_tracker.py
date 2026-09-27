@@ -1,14 +1,17 @@
-"""Device tracker — each client is its own device, connected *via* the gateway.
+"""Device tracker — one ScannerEntity per client.
 
-Using via_device makes Home Assistant group every tracked client underneath the
-gateway: the gateway's device page lists them, and each client is clickable in
-its own right. This is the standard router-integration hierarchy.
+IMPORTANT: Home Assistant makes ScannerEntity.device_info @final and always
+returns None, so any DeviceInfo set on a tracker is silently ignored. HA builds
+the client device itself, named `hostname or mac_address`. So the friendly name
+must be exposed through `hostname`, and because HA never renames an existing
+device, we push name changes into the device registry ourselves.
 """
 import logging
 
 from homeassistant.components.device_tracker import SourceType
 from homeassistant.components.device_tracker.config_entry import ScannerEntity
-from homeassistant.helpers.device_registry import DeviceInfo, CONNECTION_NETWORK_MAC
+from homeassistant.core import callback
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
@@ -51,16 +54,55 @@ class ReyeeTracker(CoordinatorEntity, ScannerEntity):
         self._mac = mac
         self._last_ip = None
         self._entry = entry
+        self._last_name = None
+        # NB: ScannerEntity.unique_id returns mac_address; this is not used.
         self._attr_unique_id = f"{entry.entry_id}_tracker_{mac.replace(':', '')}"
 
-        name = _resolve_name(coordinator, mac)
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"{entry.entry_id}_client_{mac.replace(':', '')}")},
-            connections={(CONNECTION_NETWORK_MAC, mac)},
-            name=name,
-            # This is the hierarchy: client hangs off the gateway device.
-            via_device=(DOMAIN, entry.entry_id),
-        )
+    def _friendly_name(self):
+        """Resolved client name, or None when all we have is the MAC."""
+        name = _resolve_name(self.coordinator, self._mac)
+        if not name or name.upper() == self._mac.upper():
+            return None
+        return name
+
+    @property
+    def hostname(self):
+        # HA names the client device `hostname or mac_address` — this is
+        # the only name HA reads for a tracker's device.
+        return self._friendly_name()
+
+    @callback
+    def _sync_device_name(self):
+        """Push the resolved name into the device registry.
+
+        HA sets the device name only when it creates the device, so without
+        this a device that started as a MAC stays a MAC forever. Only touches
+        devices owned solely by this entry, and never a user-set name.
+        """
+        name = self._friendly_name()
+        if not name or name == self._last_name or not self.registry_entry:
+            return
+        device_id = self.registry_entry.device_id
+        if not device_id:
+            return
+        reg = dr.async_get(self.hass)
+        device = reg.async_get(device_id)
+        if device is None:
+            return
+        self._last_name = name
+        if (device.name_by_user is None
+                and set(device.config_entries) == {self._entry.entry_id}
+                and device.name != name):
+            reg.async_update_device(device_id, name=name)
+
+    async def async_added_to_hass(self):
+        await super().async_added_to_hass()
+        self._sync_device_name()
+
+    @callback
+    def _handle_coordinator_update(self):
+        self._sync_device_name()
+        super()._handle_coordinator_update()
 
     def _client(self):
         for c in (self.coordinator.data or {}).get("clients", []):
