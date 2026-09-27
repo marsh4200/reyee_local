@@ -1,17 +1,14 @@
-"""Device tracker — client presence entities living on the gateway device.
+"""Device tracker — each client is its own device, connected *via* the gateway.
 
-Reyee gateways report dozens of transient LAN/WiFi clients. Giving each one
-its own Home Assistant device (as before, via `via_device`) floods the device
-registry with entries for phones, laptops, etc. that come and go. Instead,
-every tracker entity attaches directly to the single gateway device, exactly
-like every other entity this integration creates — so only the router shows
-up as a device, with per-client presence exposed as entities on it.
+Using via_device makes Home Assistant group every tracked client underneath the
+gateway: the gateway's device page lists them, and each client is clickable in
+its own right. This is the standard router-integration hierarchy.
 """
 import logging
 
 from homeassistant.components.device_tracker import SourceType
 from homeassistant.components.device_tracker.config_entry import ScannerEntity
-from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.device_registry import DeviceInfo, CONNECTION_NETWORK_MAC
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
@@ -45,10 +42,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
 
 class ReyeeTracker(CoordinatorEntity, ScannerEntity):
-    # Entities carry their own name (the client's name/hostname) rather than
-    # inheriting the gateway device's name, since many entities now share
-    # that one device.
-    _attr_has_entity_name = False
+    # The client device carries the name; the tracker entity inherits it.
+    _attr_has_entity_name = True
+    _attr_name = None
 
     def __init__(self, coordinator, entry, mac):
         super().__init__(coordinator)
@@ -56,12 +52,15 @@ class ReyeeTracker(CoordinatorEntity, ScannerEntity):
         self._last_ip = None
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_tracker_{mac.replace(':', '')}"
-        # Attach to the gateway device itself — no separate per-client device.
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, entry.entry_id)})
 
-    @property
-    def name(self):
-        return _resolve_name(self.coordinator, self._mac)
+        name = _resolve_name(coordinator, mac)
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{entry.entry_id}_client_{mac.replace(':', '')}")},
+            connections={(CONNECTION_NETWORK_MAC, mac)},
+            name=name,
+            # This is the hierarchy: client hangs off the gateway device.
+            via_device=(DOMAIN, entry.entry_id),
+        )
 
     def _client(self):
         for c in (self.coordinator.data or {}).get("clients", []):
