@@ -8,6 +8,8 @@ import logging
 
 from homeassistant.components.device_tracker import SourceType
 from homeassistant.components.device_tracker.config_entry import ScannerEntity
+from homeassistant.core import callback
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo, CONNECTION_NETWORK_MAC
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -54,8 +56,9 @@ class ReyeeTracker(CoordinatorEntity, ScannerEntity):
         self._attr_unique_id = f"{entry.entry_id}_tracker_{mac.replace(':', '')}"
 
         name = _resolve_name(coordinator, mac)
+        self._identifier = (DOMAIN, f"{entry.entry_id}_client_{mac.replace(':', '')}")
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"{entry.entry_id}_client_{mac.replace(':', '')}")},
+            identifiers={self._identifier},
             connections={(CONNECTION_NETWORK_MAC, mac)},
             name=name,
             # This is the hierarchy: client hangs off the gateway device.
@@ -69,6 +72,39 @@ class ReyeeTracker(CoordinatorEntity, ScannerEntity):
                     self._last_ip = c["ip"]
                 return c
         return None
+
+    async def async_added_to_hass(self):
+        await super().async_added_to_hass()
+        self._sync_device_name()
+
+    @callback
+    def _handle_coordinator_update(self):
+        self._sync_device_name()
+        super()._handle_coordinator_update()
+
+    @callback
+    def _sync_device_name(self):
+        """Push the resolved client name into the device registry.
+
+        DeviceInfo is only applied when the entity is first added, so a client
+        that was created while names were unavailable stays stuck on its MAC.
+        This heals it on the next poll. A name set by the user in HA is never
+        touched, and a real name is never downgraded back to a MAC.
+        """
+        if self.hass is None:
+            return
+        name = _resolve_name(self.coordinator, self._mac)
+        if not name or name == self._mac.upper():
+            return
+        reg = dr.async_get(self.hass)
+        dev = reg.async_get_device(identifiers={self._identifier})
+        if dev and dev.name_by_user is None and dev.name != name:
+            reg.async_update_device(dev.id, name=name)
+
+    @property
+    def hostname(self):
+        name = _resolve_name(self.coordinator, self._mac)
+        return None if name == self._mac.upper() else name
 
     @property
     def source_type(self):
