@@ -272,9 +272,12 @@ class ReyeeCoordinator(DataUpdateCoordinator):
             v = self._match_vlan(ip, vlans)
             vname = v["name"] if v else (intf or "Unknown")
             u = u or {}
+            # deviceAliasName is the alias of the Reyee *network device* (AP /
+            # switch) the client hangs off — not the client. Never use it as
+            # the client's name; expose it as access_point instead.
             name = (remark.get(mac)
-                    or _clean_name(u.get("deviceAliasName"))
                     or _clean_name(u.get("hostName"))
+                    or _clean_name(u.get("hostname"))
                     or mac.upper())
             ctype = u.get("connectType")
             rate = rate_by_ip.get(ip, {})
@@ -283,6 +286,7 @@ class ReyeeCoordinator(DataUpdateCoordinator):
                 "vlan": vname, "vlan_id": v["vlan_id"] if v else None,
                 "connection": ("wireless" if ctype == "wireless"
                                else "wired" if ctype == "wire" else None),
+                "access_point": _clean_name(u.get("deviceAliasName")),
                 "ssid": _clean_name(u.get("ssid")),
                 "band": _clean_name(u.get("band")),
                 "rssi": u.get("rssi") or None,

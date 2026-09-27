@@ -151,6 +151,8 @@ class ReyeeTracker(CoordinatorEntity, ScannerEntity):
             attrs["ssid"] = c.get("ssid")
             attrs["band"] = c.get("band")
             attrs["signal_dbm"] = c.get("rssi")
+        if c.get("access_point"):
+            attrs["access_point"] = c.get("access_point")
         if c.get("switch_port"):
             attrs["switch_port"] = c.get("switch_port")
         if c.get("online_since"):
