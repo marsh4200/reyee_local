@@ -12,6 +12,7 @@ from .const import DOMAIN, PLATFORMS, CONF_HOST, CONF_PASSWORD, CONF_USERNAME
 from .api import ReyeeLocalAPI
 from .coordinator import ReyeeCoordinator
 from .diagnostics_probe import run_deep_probe
+from .subentries import NETWORK, ensure_subentries, migrate_devices, subentry_id
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -23,6 +24,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         username=entry.data.get(CONF_USERNAME, "admin"),
         session=async_get_clientsession(hass),
     )
+
+    # Two collapsible groups on the integration page (HA 2025.3+):
+    # "Reyee Network" (gateway/APs/switches) and "Connected Devices" (clients).
+    ensure_subentries(hass, entry)
+    migrate_devices(hass, entry)
 
     coordinator = ReyeeCoordinator(hass, entry, api)
     await coordinator.async_config_entry_first_refresh()
@@ -55,6 +61,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             connections={(dr.CONNECTION_NETWORK_MAC, sys.get("sys_mac"))}
                         if sys.get("sys_mac") else set(),
             configuration_url=f"http://{entry.data[CONF_HOST]}",
+            **({"config_subentry_id": subentry_id(entry, NETWORK)}
+               if subentry_id(entry, NETWORK) else {}),
         )
         # Correct an earlier fallback name now that we know the model —
         # but never override a name the user set themselves.

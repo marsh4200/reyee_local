@@ -6,11 +6,13 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
+from .subentries import NETWORK, bind
 
 _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
+    async_add_entities = bind(entry, async_add_entities, NETWORK)
     coordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities([ReyeePrimaryWanSelect(coordinator, entry)])
 

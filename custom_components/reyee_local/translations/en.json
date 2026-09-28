@@ -29,5 +29,13 @@
         }
       }
     }
+  },
+  "config_subentries": {
+    "network": {
+      "entry_type": "Router, access points & switches"
+    },
+    "clients": {
+      "entry_type": "Clients connected to the network"
+    }
   }
 }

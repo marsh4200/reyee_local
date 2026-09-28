@@ -8,13 +8,13 @@ device, we push name changes into the device registry ourselves.
 """
 import logging
 
-from homeassistant.components.device_tracker import SourceType
-from homeassistant.components.device_tracker.config_entry import ScannerEntity
+from homeassistant.components.device_tracker import ScannerEntity, SourceType
 from homeassistant.core import callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
+from .subentries import CLIENTS, bind
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -27,6 +27,7 @@ def _resolve_name(coordinator, mac):
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
+    async_add_entities = bind(entry, async_add_entities, CLIENTS)
     coordinator = hass.data[DOMAIN][entry.entry_id]
     seen = set()
 
