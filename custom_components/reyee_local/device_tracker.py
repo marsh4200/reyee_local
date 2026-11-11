@@ -14,7 +14,8 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
-from .subentries import CLIENTS, bind
+from .coordinator import _norm_mac
+from .subentries import CLIENTS, ap_records, bind
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -29,12 +30,17 @@ def _resolve_name(coordinator, mac):
 async def async_setup_entry(hass, entry, async_add_entities):
     async_add_entities = bind(entry, async_add_entities, CLIENTS)
     coordinator = hass.data[DOMAIN][entry.entry_id]
+    # APs already belong to the APS subentry. Registering the same MAC as a
+    # CLIENTS tracker moves the device and deletes its AP monitoring entities.
+    ap_macs = {_norm_mac(r.get("mac")) for r in ap_records(entry)} - {""}
     seen = set()
 
     def _add():
         new = []
         for c in (coordinator.data or {}).get("clients", []):
             mac = c.get("mac")
+            if _norm_mac(mac) in ap_macs:
+                continue
             if mac and mac not in seen:
                 seen.add(mac)
                 new.append(ReyeeTracker(coordinator, entry, mac))
